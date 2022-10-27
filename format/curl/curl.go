@@ -146,7 +146,7 @@ func (p *responseFormatter) convertProtoMessageToMap(m proto.Message) (map[strin
 	var res map[string]interface{}
 	if err := gojson.Unmarshal(buf.Bytes(), &res); err != nil {
 		 fmt.Println(buf.String())
-		 return res, nil
+		 return nil, nil
 	}
 	return res, nil
 }
