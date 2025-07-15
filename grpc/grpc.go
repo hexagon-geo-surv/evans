@@ -112,11 +112,12 @@ type client struct {
 // verify the hostname on the returned certificates.
 // If useReflection is true, the gRPC client enables gRPC reflection.
 // If useTLS is true, the gRPC client establishes a secure connection with the server.
+// If trustCA is true, the gRPC client trusts the server, downloading its TLS certificate chain in the first place.
 //
 // The set of cert and certKey enables mutual authentication if useTLS is enabled.
 // If one of it is not found, NewClient returns ErrMutualAuthParamsAreNotEnough.
 // If useTLS is false, cacert, cert and certKey are ignored.
-func NewClient(addr, serverName string, useReflection, useTLS bool, cacert, cert, certKey string, headers map[string][]string) (Client, error) {
+func NewClient(addr, serverName string, useReflection, useTLS bool, trustCA bool, cacert, cert, certKey string, headers map[string][]string) (Client, error) {
 	var opts []grpc.DialOption
 	if !useTLS {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -133,13 +134,15 @@ func NewClient(addr, serverName string, useReflection, useTLS bool, cacert, cert
 			}
 		}
 
-		// Optionally download server certificates and add them to the certificate pool
-		serverCerts, err := downloadServerCertificate(serverName, addr)
-		if err != nil {
-			logger.Println("server not providing own certificates, skipping")
-		} else {
-			for _, cert := range serverCerts {
-				cp.AddCert(cert)
+		if trustCA {
+			// Optionally download server certificates and add them to the certificate pool
+			serverCerts, err := downloadServerCertificate(serverName, addr)
+			if err != nil {
+				logger.Println("server not providing own certificates, skipping")
+			} else {
+				for _, cert := range serverCerts {
+					cp.AddCert(cert)
+				}
 			}
 		}
 

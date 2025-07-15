@@ -210,6 +210,11 @@ func TestE2E_OldCLI(t *testing.T) {
 			tls:          true,
 			expectedCode: 1,
 		},
+		"call unary RPC with TLS, trusting the server": {
+			args:         "--tls --tls-trust-server --host localhost --service Example --call Unary --file testdata/unary_call.in testdata/test.proto",
+			tls:          true,
+			expectedCode: 0,
+		},
 		"cannot launch CLI mode with TLS because cannot validate certs for 127.0.0.1 (default value)": {
 			args:         "--tls --service Example --call Unary --file testdata/unary_call.in testdata/test.proto",
 			tls:          true,
@@ -369,6 +374,7 @@ Options:
         --web                            use gRPC-Web protocol (default "false")
         --reflection, -r                 use gRPC reflection (default "false")
         --tls, -t                        use a secure TLS connection (default "false")
+        --tls-trust-server               fetch and trust the CA cert provided by the server (default "false")
         --cacert string                  the CA certificate file for verifying the server
         --cert string                    the certificate file for mutual TLS auth. it must be provided with --certkey.
         --certkey string                 the private key file for mutual TLS auth. it must be provided with --cert.

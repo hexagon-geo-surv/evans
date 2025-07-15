@@ -26,11 +26,12 @@ var (
 )
 
 type Server struct {
-	Host       string `toml:"host"`
-	Port       string `toml:"port"`
-	Reflection bool   `toml:"reflection"`
-	TLS        bool   `toml:"tls"`
-	Name       string `toml:"name"`
+	Host           string `toml:"host"`
+	Port           string `toml:"port"`
+	Reflection     bool   `toml:"reflection"`
+	TLS            bool   `toml:"tls"`
+	TLSTrustServer bool   `toml:"tls_trust_server"`
+	Name           string `toml:"name"`
 }
 
 type Header map[string][]string
@@ -97,6 +98,7 @@ func (c *Config) Validate() error {
 		{"one or more proto files, or gRPC reflection required", len(c.Default.ProtoFile) == 0 && !c.Server.Reflection},
 		// TODO: support it.
 		{"currently, gRPC-Web with TLS communication is not supported", c.Request.Web && c.Server.TLS},
+		{"currently, gRPC-Web with TLS communication is not supported", c.Request.Web && c.Server.TLSTrustServer},
 	}
 	for _, c := range invalidCases {
 		if c.cond {
@@ -158,6 +160,7 @@ func newDefaultViper() *viper.Viper {
 	v.SetDefault("server.port", "50051")
 	v.SetDefault("server.reflection", false)
 	v.SetDefault("server.tls", false)
+	v.SetDefault("server.tlsTrustServer", false)
 	v.SetDefault("server.name", "")
 
 	v.SetDefault("log.prefix", "evans: ")
@@ -175,21 +178,22 @@ func newDefaultViper() *viper.Viper {
 func bindFlags(vp *viper.Viper, fs *pflag.FlagSet) {
 	// kv defines the mapping from a viper config name to a flag name.
 	kv := map[string]string{
-		"default.protoPath":   "path",
-		"default.protoFile":   "proto",
-		"default.package":     "package",
-		"default.service":     "service",
-		"server.host":         "host",
-		"server.port":         "port",
-		"server.reflection":   "reflection",
-		"server.tls":          "tls",
-		"server.name":         "servername",
-		"request.header":      "header",
-		"request.web":         "web",
-		"request.cacertFile":  "cacert",
-		"request.certFile":    "cert",
-		"request.certKeyFile": "certkey",
-		"repl.silent":         "silent",
+		"default.protoPath":     "path",
+		"default.protoFile":     "proto",
+		"default.package":       "package",
+		"default.service":       "service",
+		"server.host":           "host",
+		"server.port":           "port",
+		"server.reflection":     "reflection",
+		"server.tls":            "tls",
+		"server.tlsTrustServer": "tls-trust-server",
+		"server.name":           "servername",
+		"request.header":        "header",
+		"request.web":           "web",
+		"request.cacertFile":    "cacert",
+		"request.certFile":      "cert",
+		"request.certKeyFile":   "certkey",
+		"repl.silent":           "silent",
 	}
 	for k, v := range kv {
 		f := fs.Lookup(v)
