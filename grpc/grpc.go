@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -111,27 +112,41 @@ type client struct {
 // verify the hostname on the returned certificates.
 // If useReflection is true, the gRPC client enables gRPC reflection.
 // If useTLS is true, the gRPC client establishes a secure connection with the server.
+// If trustCA is true, the gRPC client trusts the server, downloading its TLS certificate chain in the first place.
 //
 // The set of cert and certKey enables mutual authentication if useTLS is enabled.
 // If one of it is not found, NewClient returns ErrMutualAuthParamsAreNotEnough.
 // If useTLS is false, cacert, cert and certKey are ignored.
-func NewClient(addr, serverName string, useReflection, useTLS bool, cacert, cert, certKey string, headers map[string][]string) (Client, error) {
+func NewClient(addr, serverName string, useReflection, useTLS bool, trustCA bool, cacert, cert, certKey string, headers map[string][]string) (Client, error) {
 	var opts []grpc.DialOption
 	if !useTLS {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	} else { // Enable TLS authentication
 		var tlsCfg tls.Config
+		cp := x509.NewCertPool()
 		if cacert != "" {
 			b, err := os.ReadFile(cacert)
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to read the CA certificate")
 			}
-			cp := x509.NewCertPool()
 			if !cp.AppendCertsFromPEM(b) {
 				return nil, errors.New("failed to append the client certificate")
 			}
-			tlsCfg.RootCAs = cp
 		}
+
+		if trustCA {
+			// Optionally download server certificates and add them to the certificate pool
+			serverCerts, err := downloadServerCertificate(serverName, addr)
+			if err != nil {
+				logger.Println("server not providing own certificates, skipping")
+			} else {
+				for _, cert := range serverCerts {
+					cp.AddCert(cert)
+				}
+			}
+		}
+
+		tlsCfg.RootCAs = cp
 		if cert != "" && certKey != "" {
 			// Enable mutual authentication
 			certificate, err := tls.LoadX509KeyPair(cert, certKey)
@@ -334,4 +349,37 @@ func loggingRequest(req interface{}) {
 		}
 		return []interface{}{"request:\n" + string(b)}
 	})
+}
+
+// downloadServerCertificate downloads the TLS certificate from the specified server and port
+func downloadServerCertificate(serverName, addr string) ([]*x509.Certificate, error) {
+	// Parse the address to extract host and port
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		// If no port is specified, assume default port 443
+		host = addr
+		port = "443"
+	}
+
+	// Use serverName if provided, otherwise use the host from addr
+	if serverName != "" {
+		host = serverName
+	}
+
+	// Create a connection to download the certificate
+	conn, err := tls.Dial("tcp", net.JoinHostPort(host, port), &tls.Config{
+		InsecureSkipVerify: true, // We need to skip verification to download the cert
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to connect to server for certificate download")
+	}
+	defer conn.Close()
+
+	// Get the peer certificates
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return nil, errors.New("no certificates received from server")
+	}
+
+	return certs, nil
 }

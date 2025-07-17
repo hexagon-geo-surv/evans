@@ -405,6 +405,13 @@ func TestE2E_CLI(t *testing.T) {
 			reflection:   true,
 			expectedCode: 1,
 		},
+		"call unary RPC with TLS, trusting the server": {
+			commonFlags:  "--tls --tls-trust-server --host localhost --proto testdata/test.proto",
+			cmd:          "call",
+			args:         "--file testdata/unary_call.in api.Example.Unary",
+			tls:          true,
+			expectedCode: 0,
+		},
 		"call unary RPC with TLS and reflection": {
 			commonFlags: "--tls -r --host localhost --cacert testdata/rootCA.pem",
 			cmd:         "call",
