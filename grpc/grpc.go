@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"strings"
 	"time"
@@ -353,21 +352,8 @@ func loggingRequest(req interface{}) {
 
 // downloadServerCertificate downloads the TLS certificate from the specified server and port
 func downloadServerCertificate(serverName, addr string) ([]*x509.Certificate, error) {
-	// Parse the address to extract host and port
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		// If no port is specified, assume default port 443
-		host = addr
-		port = "443"
-	}
-
-	// Use serverName if provided, otherwise use the host from addr
-	if serverName != "" {
-		host = serverName
-	}
-
 	// Create a connection to download the certificate
-	conn, err := tls.Dial("tcp", net.JoinHostPort(host, port), &tls.Config{
+	conn, err := tls.Dial("tcp", addr, &tls.Config{
 		InsecureSkipVerify: true, // We need to skip verification to download the cert
 	})
 	if err != nil {
@@ -379,6 +365,16 @@ func downloadServerCertificate(serverName, addr string) ([]*x509.Certificate, er
 	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) == 0 {
 		return nil, errors.New("no certificates received from server")
+	}
+
+outer:
+	for _, cert := range certs {
+		for _, dnsName := range cert.DNSNames {
+			if dnsName == serverName {
+				logger.Println("Found the expected server name in server's certificate chain")
+				break outer
+			}
+		}
 	}
 
 	return certs, nil
