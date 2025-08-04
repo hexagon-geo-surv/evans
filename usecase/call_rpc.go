@@ -2,13 +2,14 @@ package usecase
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"strings"
 	"sync"
 	"time"
 
-	pb "github.com/ktr0731/evans/proto"
+	"github.com/jhump/protoreflect/dynamic"
+	"github.com/ktr0731/evans/grpc"
+	"github.com/ktr0731/evans/idl/proto"
 
 	"github.com/ktr0731/evans/fill"
 	"github.com/ktr0731/evans/logger"
@@ -18,9 +19,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/types/dynamicpb"
 )
 
 // ErrorCode represents an application error code.
@@ -54,19 +52,16 @@ func CallRPC(ctx context.Context, w io.Writer, rpcName string) error {
 	return dm.CallRPC(ctx, w, rpcName, false, dm.filler)
 }
 func (m *dependencyManager) CallRPC(ctx context.Context, w io.Writer, rpcName string, rerunPrevious bool, filler fill.Filler) error {
-	fqsn := pb.FullyQualifiedServiceName(m.state.selectedPackage, m.state.selectedService)
-	d, err := m.descSource.FindSymbol(fmt.Sprintf("%s.%s", fqsn, rpcName))
+	fqsn := proto.FullyQualifiedServiceName(m.state.selectedPackage, m.state.selectedService)
+	rpc, err := m.spec.RPC(fqsn, rpcName)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get the RPC descriptor for: %s", rpcName)
 	}
-
-	rpc := d.(protoreflect.MethodDescriptor) // TODO: handle "ok".
-
-	if rerunPrevious && rpc.IsStreamingClient() {
+	if rerunPrevious && rpc.IsClientStreaming {
 		return errors.New("cannot rerun previous RPC as client/bidi streaming RPCs are not supported")
 	}
-	newRequest := func() (*dynamicpb.Message, error) {
-		req := dynamicpb.NewMessage(rpc.Input())
+	newRequest := func() (interface{}, error) {
+		req := rpc.RequestType.New()
 		if !rerunPrevious {
 			err = filler.Fill(req)
 			if errors.Is(err, io.EOF) {
@@ -75,18 +70,18 @@ func (m *dependencyManager) CallRPC(ctx context.Context, w io.Writer, rpcName st
 			if err != nil {
 				return nil, err
 			}
-			if err := m.updateMethodCallState(rpcName, req); err != nil {
+			if err := m.updateRPCCallState(rpcName, req); err != nil {
 				return nil, err
 			}
 			return req, nil
 		}
-		if err = m.getPreviousRPCRequest(rpc, req); err != nil {
+		if err = m.getPreviousRPCRequest(rpc, req.(*dynamic.Message)); err != nil {
 			return nil, err
 		}
 		return req, nil
 	}
 	newResponse := func() interface{} {
-		return dynamicpb.NewMessage(rpc.Output())
+		return rpc.ResponseType.New()
 	}
 	flushHeader := func(header metadata.MD) {
 		m.responseFormatter.FormatHeader(header)
@@ -144,20 +139,20 @@ func (m *dependencyManager) CallRPC(ctx context.Context, w io.Writer, rpcName st
 	}
 
 	streamDesc := &gogrpc.StreamDesc{
-		StreamName:    string(rpc.Name()),
-		ServerStreams: rpc.IsStreamingServer(),
-		ClientStreams: rpc.IsStreamingClient(),
+		StreamName:    rpc.Name,
+		ServerStreams: rpc.IsServerStreaming,
+		ClientStreams: rpc.IsClientStreaming,
 	}
 
 	switch {
-	case rpc.IsStreamingClient() && rpc.IsStreamingServer():
+	case rpc.IsClientStreaming && rpc.IsServerStreaming:
 		ctx, cancel, err := enhanceContext(ctx)
 		if err != nil {
 			cancel()
 			return errors.Wrap(err, "failed to enhance context with metadata")
 		}
 
-		stream, err := m.gRPCClient.NewBidiStream(ctx, streamDesc, string(rpc.FullName()))
+		stream, err := m.gRPCClient.NewBidiStream(ctx, streamDesc, rpc.FullyQualifiedName)
 		if err != nil {
 			cancel()
 			return errors.Wrapf(err, "failed to create a bidi stream for RPC '%s'", streamDesc.StreamName)
@@ -261,14 +256,14 @@ func (m *dependencyManager) CallRPC(ctx context.Context, w io.Writer, rpcName st
 	//   5. Send the close message and receive the response.
 	//   6. Format the response and output it.
 	//
-	case rpc.IsStreamingClient():
+	case rpc.IsClientStreaming:
 		ctx, cancel, err := enhanceContext(ctx)
 		if err != nil {
 			cancel()
 			return errors.Wrap(err, "failed to enhance context with metadata")
 		}
 
-		stream, err := m.gRPCClient.NewClientStream(ctx, streamDesc, string(rpc.FullName()))
+		stream, err := m.gRPCClient.NewClientStream(ctx, streamDesc, rpc.FullyQualifiedName)
 		if err != nil {
 			cancel()
 			return errors.Wrapf(err, "failed to create a new client stream for RPC '%s'", streamDesc.StreamName)
@@ -322,7 +317,7 @@ func (m *dependencyManager) CallRPC(ctx context.Context, w io.Writer, rpcName st
 	//   4. Format a received response and output it.
 	//   5. If io.EOF received, finish the RPC connection.
 	//
-	case rpc.IsStreamingServer():
+	case rpc.IsServerStreaming:
 		req, err := newRequest()
 		if err != nil {
 			return err
@@ -334,7 +329,7 @@ func (m *dependencyManager) CallRPC(ctx context.Context, w io.Writer, rpcName st
 			return errors.Wrap(err, "failed to enhance context with metadata")
 		}
 
-		stream, err := m.gRPCClient.NewServerStream(ctx, streamDesc, string(rpc.FullName()))
+		stream, err := m.gRPCClient.NewServerStream(ctx, streamDesc, rpc.FullyQualifiedName)
 		if err != nil {
 			cancel()
 			return errors.Wrapf(err, "failed to create a new server stream for RPC '%s'", streamDesc.StreamName)
@@ -392,7 +387,7 @@ func (m *dependencyManager) CallRPC(ctx context.Context, w io.Writer, rpcName st
 			}
 		}
 
-	// If both of rpc.IsStreamingClient() and rpc.IsStreamingServer() are false, it means its RPC is an unary RPC.
+	// If both of rpc.IsServerStreaming and rpc.IsClientStreaming are nil, it means its RPC is an unary RPC.
 	// Unary RPCs are processed by the following instruction.
 	//
 	//   1. Create a new request and fill input to it.
@@ -413,7 +408,7 @@ func (m *dependencyManager) CallRPC(ctx context.Context, w io.Writer, rpcName st
 		}
 
 		res := newResponse()
-		header, trailer, err := m.gRPCClient.Invoke(ctx, string(rpc.FullName()), req, res)
+		header, trailer, err := m.gRPCClient.Invoke(ctx, rpc.FullyQualifiedName, req, res)
 		stat, err := handleGRPCResponseError(err)
 		if err != nil {
 			cancel()
@@ -436,32 +431,33 @@ func (m *dependencyManager) CallRPC(ctx context.Context, w io.Writer, rpcName st
 	}
 }
 
-// Gets a request with the body containing the payload of its previous method
+// Gets a request with the body containing the payload of its previous RPC
 // Only RPCs that are repeatable by definition will have their previous requests returned.
-func (m *dependencyManager) getPreviousRPCRequest(method protoreflect.MethodDescriptor, req proto.Message) error {
-	id := rpcIdentifier(string(method.FullName()))
+func (m *dependencyManager) getPreviousRPCRequest(rpc *grpc.RPC, req *dynamic.Message) error {
+	id := rpcIdentifier(rpc.Name)
 	if _, ok := m.state.rpcCallState[id]; !ok {
-		return errors.Errorf("no previous request exists for method: %s, please issue a normal request", id)
+		return errors.Errorf("no previous request exists for RPC: %s, please issue a normal request", id)
 	}
-	if method.IsStreamingClient() {
-		return errors.Errorf("cannot rerun previous method: %s as client/bidi streaming RPCs are not supported", id)
+	if rpc.IsClientStreaming {
+		return errors.Errorf("cannot rerun previous RPC: %s as client/bidi streaming RPCs are not supported", id)
 	}
 	previousReqBytes := m.state.rpcCallState[id].requestPayload
 	if previousReqBytes == nil {
-		return errors.Errorf("no previous request body exists for method: %s, please issue a normal request", id)
+		return errors.Errorf("no previous request body exists for RPC: %s, please issue a normal request", id)
 	}
-	err := proto.Unmarshal(previousReqBytes, req) // TODO: Custom resolver.
+	err := req.Unmarshal(previousReqBytes)
 	if err != nil {
-		return errors.Wrapf(err, "error while unmarshalling request for method: %s, please run without the --repeat option", id)
+		return errors.Wrapf(err, "error while unmarshalling request for RPC: %s, please run without the --repeat option", id)
 	}
 	return nil
 }
 
-// Updates the last call state for the given method. This is done by serializing
+// Updates the last call state for the given RPC. This is done by serializing
 // the request payload and store it into the state buffer indexed by the rpcName
-// The method is repeatable only if it is not a client streaming method.
-func (m *dependencyManager) updateMethodCallState(rpcName string, req *dynamicpb.Message) error {
-	reqBytes, err := proto.Marshal(req)
+// The RPC is repeatable only if it is not a client streaming rpc.
+func (m *dependencyManager) updateRPCCallState(rpcName string, req interface{}) error {
+	message := req.(*dynamic.Message)
+	reqBytes, err := message.Marshal()
 	if err != nil {
 		return err
 	}
@@ -475,10 +471,10 @@ func (m *dependencyManager) updateMethodCallState(rpcName string, req *dynamicpb
 }
 
 type interactiveFiller struct {
-	fillFunc func(v *dynamicpb.Message) error
+	fillFunc func(v interface{}) error
 }
 
-func (f *interactiveFiller) Fill(v *dynamicpb.Message) error {
+func (f *interactiveFiller) Fill(v interface{}) error {
 	return f.fillFunc(v)
 }
 
@@ -488,7 +484,7 @@ func CallRPCInteractively(ctx context.Context, w io.Writer, rpcName string, digM
 
 func (m *dependencyManager) CallRPCInteractively(ctx context.Context, w io.Writer, rpcName string, digManually, bytesAsBase64, bytesAsQuotedLiterals, bytesFromFile, rerunPrevious, addRepeatedManually bool) error {
 	return m.CallRPC(ctx, w, rpcName, rerunPrevious, &interactiveFiller{
-		fillFunc: func(v *dynamicpb.Message) error {
+		fillFunc: func(v interface{}) error {
 			return m.interactiveFiller.Fill(v, fill.InteractiveFillerOpts{
 				DigManually:           digManually,
 				BytesAsBase64:         bytesAsBase64,

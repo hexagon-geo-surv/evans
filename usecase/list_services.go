@@ -1,13 +1,13 @@
 package usecase
 
 // ListServices returns the loaded fully-qualified service names.
-func ListServices() ([]string, error) {
+func ListServices() []string {
 	return dm.ListServices()
 }
-func (m *dependencyManager) ListServices() ([]string, error) {
+func (m *dependencyManager) ListServices() []string {
 	return m.listServices()
 }
 
-func (m *dependencyManager) listServices() ([]string, error) {
-	return m.descSource.ListServices()
+func (m *dependencyManager) listServices() []string {
+	return m.spec.ServiceNames()
 }
