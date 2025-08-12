@@ -30,7 +30,7 @@ type Server struct {
 	Port           string `toml:"port"`
 	Reflection     bool   `toml:"reflection"`
 	TLS            bool   `toml:"tls"`
-	TLSTrustServer bool   `toml:"tls_trust_server"`
+	TLSTrustServer bool   `toml:"tlsTrustServer"`
 	Name           string `toml:"name"`
 }
 

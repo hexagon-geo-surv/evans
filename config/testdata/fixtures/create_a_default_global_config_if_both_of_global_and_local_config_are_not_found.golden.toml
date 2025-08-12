@@ -36,3 +36,4 @@
   port = "50051"
   reflection = false
   tls = false
+  tlstrustserver = false
