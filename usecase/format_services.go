@@ -11,11 +11,7 @@ func FormatServices() (string, error) {
 	return dm.FormatServices()
 }
 func (m *dependencyManager) FormatServices() (string, error) {
-	fqsns, err := m.ListServices()
-	if err != nil {
-		return "", err
-	}
-
+	fqsns := m.ListServices()
 	type svc struct {
 		Name string `json:"name" name:"target"`
 	}

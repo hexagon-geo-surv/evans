@@ -4,7 +4,6 @@ go 1.20
 
 require (
 	github.com/Songmu/gocredits v0.3.0
-	github.com/bufbuild/protocompile v0.1.0
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/fatih/color v1.13.0
 	github.com/golang/protobuf v1.5.2

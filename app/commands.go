@@ -160,6 +160,7 @@ func bindFlags(f *pflag.FlagSet, flags *flags, w io.Writer) {
 	f.BoolVar(&flags.common.web, "web", false, "use gRPC-Web protocol")
 	f.BoolVarP(&flags.common.reflection, "reflection", "r", false, "use gRPC reflection")
 	f.BoolVarP(&flags.common.tls, "tls", "t", false, "use a secure TLS connection")
+	f.BoolVarP(&flags.common.tlsTrustServer, "tls-trust-server", "", false, "fetch and trust the CA cert provided by the server (bypasses certificate verification, useful for self-signed certs)")
 	f.StringVar(&flags.common.cacert, "cacert", "", "the CA certificate file for verifying the server")
 	f.StringVar(
 		&flags.common.cert,

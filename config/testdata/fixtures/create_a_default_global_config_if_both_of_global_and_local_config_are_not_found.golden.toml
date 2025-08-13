@@ -10,7 +10,7 @@
 
 [meta]
   autoupdate = false
-  configversion = "0.10.11"
+  configversion = "0.10.12-leica"
   updatelevel = "patch"
 
 [repl]
@@ -36,3 +36,4 @@
   port = "50051"
   reflection = false
   tls = false
+  tlstrustserver = false

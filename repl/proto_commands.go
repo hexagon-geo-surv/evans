@@ -6,11 +6,12 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/golang/protobuf/protoc-gen-go/descriptor"
+	"github.com/jhump/protoreflect/desc"
 	"github.com/ktr0731/evans/usecase"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
-	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 type descCommand struct{}
@@ -42,14 +43,13 @@ func (c *descCommand) Run(w io.Writer, args []string) error {
 
 	table := tablewriter.NewWriter(w)
 	table.SetHeader([]string{"field", "type", "repeated"})
-	fields := td.(protoreflect.MessageDescriptor).Fields()
-	rows := make([][]string, fields.Len())
-	for i := 0; i < fields.Len(); i++ {
-		field := fields.Get(i)
+	fields := td.(*desc.MessageDescriptor).GetFields()
+	rows := make([][]string, len(fields))
+	for i, field := range fields {
 		rows[i] = []string{
-			string(field.Name()),
+			field.GetName(),
 			presentTypeName(field),
-			strconv.FormatBool(field.IsList() && !field.IsMap()),
+			strconv.FormatBool(field.IsRepeated() && !field.IsMap()),
 		}
 	}
 
@@ -62,21 +62,21 @@ func (c *descCommand) Run(w io.Writer, args []string) error {
 	return nil
 }
 
-func presentTypeName(f protoreflect.FieldDescriptor) string {
-	typeName := f.Kind().String()
+func presentTypeName(f *desc.FieldDescriptor) string {
+	typeName := f.GetType().String()
 
-	switch f.Kind() {
-	case protoreflect.MessageKind:
+	switch f.GetType() {
+	case descriptor.FieldDescriptorProto_TYPE_MESSAGE:
 		if f.IsMap() {
 			typeName = fmt.Sprintf(
 				"map<%s, %s>",
-				presentTypeName(f.MapKey()),
-				presentTypeName(f.MapValue()))
+				presentTypeName(f.GetMapKeyType()),
+				presentTypeName(f.GetMapValueType()))
 		} else {
-			typeName += fmt.Sprintf(" (%s)", f.Message().Name())
+			typeName += fmt.Sprintf(" (%s)", f.GetMessageType().GetName())
 		}
-	case protoreflect.EnumKind:
-		typeName += fmt.Sprintf(" (%s)", f.Enum().Name())
+	case descriptor.FieldDescriptorProto_TYPE_ENUM:
+		typeName += fmt.Sprintf(" (%s)", f.GetEnumType().GetName())
 	}
 	return typeName
 }

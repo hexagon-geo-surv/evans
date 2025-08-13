@@ -27,6 +27,7 @@ func TestNewClient(t *testing.T) {
 		addr          string
 		useReflection bool
 		useTLS        bool
+		trustCA       bool
 		cacert        string
 		cert          string
 		certKey       string
@@ -39,6 +40,7 @@ func TestNewClient(t *testing.T) {
 		"certKey is missing, but useTLS is false": {cert: "foo"},
 		"cert is missing, but useTLS is false":    {certKey: "foo"},
 		"enable server TLS":                       {useTLS: true},
+		"enable server TLS, accepting its CA":     {useTLS: true, trustCA: true},
 		"enable server TLS with a trusted CA":     {useTLS: true, cacert: certPath("rootCA.pem")},
 		"enable mutual TLS":                       {useTLS: true, cert: certPath("localhost.pem"), certKey: certPath("localhost-key.pem")},
 		"enable mutual TLS with a trusted CA":     {useTLS: true, cacert: certPath("rootCA.pem"), cert: certPath("localhost.pem"), certKey: certPath("localhost-key.pem")},
@@ -48,7 +50,7 @@ func TestNewClient(t *testing.T) {
 	for name, c := range cases {
 		c := c
 		t.Run(name, func(t *testing.T) {
-			_, err := NewClient(c.addr, "", c.useReflection, c.useTLS, c.cacert, c.cert, c.certKey, nil)
+			_, err := NewClient(c.addr, "", c.useReflection, c.useTLS, c.trustCA, c.cacert, c.cert, c.certKey, nil)
 			if c.err != nil {
 				if err == nil {
 					t.Fatalf("NewClient must return an error, but got nil")

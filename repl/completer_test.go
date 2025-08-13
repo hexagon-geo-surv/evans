@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ktr0731/evans/proto"
+	"github.com/ktr0731/evans/idl/proto"
 	"github.com/ktr0731/evans/usecase"
 )
 
@@ -23,12 +23,11 @@ func (d *dummyDocument) TextBeforeCursor() string {
 
 func TestCompleter(t *testing.T) {
 	cmpl := newCompleter(commands)
-	descSource, err := proto.NewDescriptorSourceFromFiles([]string{"testdata"}, []string{"test.proto"})
+	spec, err := proto.LoadFiles([]string{"testdata"}, []string{"test.proto"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("LoadFiles must not return an error, but got '%s'", err)
 	}
-	usecase.Inject(usecase.Dependencies{DescSource: descSource})
-
+	usecase.Inject(usecase.Dependencies{Spec: spec})
 	err = usecase.UsePackage("api")
 	if err != nil {
 		t.Fatalf("UsePackage must not return an error, but got '%s'", err)

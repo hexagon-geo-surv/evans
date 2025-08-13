@@ -1,8 +1,6 @@
 package usecase
 
 import (
-	"fmt"
-
 	"github.com/pkg/errors"
 )
 
@@ -29,5 +27,5 @@ func (m *dependencyManager) FormatMethod(fqmn string) (string, error) {
 		}
 		return out, nil
 	}
-	return "", fmt.Errorf("method is not found: %s", fqmn)
+	return "", errors.New("method is not found")
 }
