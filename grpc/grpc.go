@@ -184,63 +184,43 @@ var ErrMutualAuthParamsAreNotEnough = errors.New("cert and certkey are required 
 //   - certKey: Client private key file for mutual TLS
 //   - headers: Additional gRPC headers
 func NewClient(addr, serverName string, useReflection, useTLS bool, trustCA bool, cacert, cert, certKey string, headers map[string][]string) (Client, error) {
-	var opts []grpc.DialOption
-	
-	if !useTLS {
-		// Standard insecure connection
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		logger.Printf("Creating insecure gRPC connection to %s", addr)
-	} else {
-		addr = normalizeAddress(addr)
-		
-		// Create insecure TLS config optimized for development
-		tlsConfig, err := createInsecureTLSConfig(cert, certKey)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create TLS configuration")
-		}
-		
-		creds := credentials.NewTLS(tlsConfig)
-		opts = append(opts, grpc.WithTransportCredentials(creds))
-		
-		// Additional gRPC options for development environments
-		if isLocalhostAddress(addr) {
-			// Optimize for localhost connections
-			opts = append(opts, 
-				grpc.WithAuthority(""),                    // Clear authority for localhost
-				grpc.WithDisableServiceConfig(),          // Disable service config validation
-				grpc.WithDisableRetry(),                  // Disable retries for faster failure
-				grpc.WithNoProxy(),                       // Direct connection
-			)
-			logger.Printf("Applied localhost optimizations for %s", addr)
-		}
-		
-		logger.Printf("Creating secure gRPC connection to %s with insecure TLS", addr)
-	}
-	
-	// Create connection with timeout and proper error handling
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	
-	logger.Printf("Dialing gRPC server at %s...", addr)
-	conn, err := grpc.DialContext(ctx, addr, opts...)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to dial gRPC server at %s", addr)
-	}
-	
-	state := conn.GetState()
-	logger.Printf("gRPC connection established to %s (state: %s)", addr, state.String())
+    var opts []grpc.DialOption
 
-	client := &client{
-		conn:    conn,
-		headers: Headers{},
-	}
+    if !useTLS {
+        opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+    } else {
+        // 1) Convert any hostname (including 'localhost') to IP -> suppresses SNI.
+        addr = forceIP(addr)
 
-	if useReflection {
-		client.Client = grpcreflection.NewClient(conn, headers)
-		logger.Printf("gRPC reflection enabled for dynamic service discovery")
-	}
+        // 2) Build insecure (no verification) TLS config + optional client cert.
+        tlsConfig, err := createInsecureTLSConfig(cert, certKey)
+        if err != nil {
+            return nil, errors.Wrap(err, "failed to create TLS configuration")
+        }
 
-	return client, nil
+        // 3) Do NOT set ServerName if we want no SNI.
+        // Only set if caller explicitly wants SNI and original addr stayed a hostname.
+        if serverName != "" && net.ParseIP(serverName) == nil {
+            tlsConfig.ServerName = serverName
+        }
+
+        creds := credentials.NewTLS(tlsConfig)
+        opts = append(opts, grpc.WithTransportCredentials(creds))
+    }
+
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    conn, err := grpc.DialContext(ctx, addr, opts...)
+    if err != nil {
+        return nil, errors.Wrapf(err, "failed to dial gRPC server at %s", addr)
+    }
+
+    c := &client{conn: conn, headers: Headers{}}
+    if useReflection {
+        c.Client = grpcreflection.NewClient(conn, headers)
+    }
+    return c, nil
 }
 
 func (c *client) Invoke(ctx context.Context, fqrn string, req, res interface{}) (header, trailer metadata.MD, _ error) {
@@ -408,4 +388,28 @@ func loggingRequest(req interface{}) {
 		}
 		return []interface{}{"request:\n" + string(b)}
 	})
+}
+
+// forceIP converts addr's host to a numeric IP (IPv4 preferred) so gRPC will NOT send SNI.
+// gRPC only injects SNI when the host is a hostname (not an IP). Using an IP removes
+// "No match found for server name: <host>" server
+func forceIP(addr string) string {
+    host, port, err := net.SplitHostPort(addr)
+    if err != nil {
+        return addr
+    }
+    if net.ParseIP(host) != nil {
+        return addr
+    }
+    ips, err := net.LookupIP(host)
+    if err != nil || len(ips) == 0 {
+        return addr
+    }
+    // Prefer IPv4
+    for _, ip := range ips {
+        if v4 := ip.To4(); v4 != nil {
+            return net.JoinHostPort(v4.String(), port)
+        }
+    }
+    return net.JoinHostPort(ips[0].String(), port)
 }
